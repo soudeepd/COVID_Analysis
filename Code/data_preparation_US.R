@@ -68,7 +68,7 @@ usdata = usdata %>% filter(population > 0)
 usdata = usdata[order(usdata$date,usdata$lat,usdata$long),]
 
 # states to be excluded - not in contiguous US
-exclusion = c("American Samoa","Guam","Hawaii","Northern Mariana Islands","Puerto Rico","Virgin Islands")
+exclusion = c("American Samoa","Alaska","Guam","Hawaii","Northern Mariana Islands","Puerto Rico","Virgin Islands")
 
 # combine statewise data into one data frame
 statewise = usdata %>%
@@ -77,34 +77,35 @@ statewise = usdata %>%
   summarize(
     lat = median(lat),
     long = median(long),
-    confirmed = sum(confirmed),
+    confirmed = sum(confirmed), # adding total numbers for different locations within same state
     death = sum(death),
     population = sum(population)
   ) %>%
   ungroup()
 
-# add week column to the data
-week_start_date = seq.Date(from = as.Date("2020-01-20"),to = as.Date("2020-12-31"),by = 7)
+# add week column (last Monday) to the data
+lastmon2 <- function(x) x - as.numeric(x-1+4)%%7
 statewise = statewise %>%
   mutate(
-    week = min(week_start_date[date < week_start_date]) - 7
+    week = lastmon2(date)
   )
 
 # make weekly data and create new variables
 statewise_weekly = statewise %>%
   group_by(country,state,lat,long,week,population) %>%
   summarize(
-    confirmed = sum(confirmed),
-    death = sum(death)
+    confirmed = max(confirmed), # getting total cases as the maximum in that week
+    death = max(death)
   ) %>%
   ungroup() %>%
+  group_by(country,state,lat,long) %>%
   mutate(
     prevalence = confirmed/population,
-    log_prevalence = log(prevalence + 0.001), # avoiding error for 0 cases
+    log_prevalence = log(prevalence + 0.1), # avoiding error for 0 cases
     prev_day_total = dplyr::lag(confirmed,default = min(confirmed)),
     new_cases = confirmed - prev_day_total,
     incidence = ifelse(new_cases > 0,new_cases/population,0),
-    log_incidence = log(incidence + 0.01), # avoiding error for 0 cases
+    log_incidence = log(incidence + 0.1), # avoiding error for 0 cases
     prev_day_actual = dplyr::lag(new_cases,default = min(confirmed))
   )
 
