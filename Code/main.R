@@ -34,20 +34,34 @@ testing = df %>% filter(week > test_wk_min)
 
 #estimating with the first training data
 
-unique_state_lat_long = unique(training1 %>% select("state","lat","long"))
+unique_state_lat_long = unique(training1 %>% dplyr::select(state,lat,long))
 distance_mat_training1 = as.matrix(distm(cbind(unique_state_lat_long$long,unique_state_lat_long$lat), fun = distHaversine))
-y_training1 = training1$log_incidence
+#training 1 values
+y_training1 = 100*training1$log_incidence
 n_training1 = length(y_training1)
 n_sp_training1 = length(unique_state_lat_long$state)
 n_tmp_training1 = n_training1/n_sp_training1
-p=12
+#total dataset values
+n_total = length(df$state)
+n_sp_total = length(unique(df$state))
+n_tmp_total = n_total/ n_sp_total
+#testing values
+y_testing = 100*testing$log_incidence
+n_testing = length(y_testing)
+n_sp_testing = length(unique(testing$state))
+n_tmp_testing = n_testing/ n_sp_testing
+p=2
 #X matrix for the model
-X_row_vec = t(rep(0,12))
+X_row_vec = vector()
 X_mat_training1 = vector()
 for (j in (1:n_training1)) {
-  X_row_vec[strtoi(format(as.Date(training1$week[j]), "%m"))] = 1 #changed to all data
+  if(j %% n_tmp_training1==0){
+    X_row_vec = c(training1$population[j],n_tmp_training1/n_tmp_total)
+  }else{
+    X_row_vec = c(training1$population[j], (j %% n_tmp_training1)/n_tmp_total)
+  }
   X_mat_training1 = rbind(X_mat_training1,X_row_vec)
-  X_row_vec = t(rep(0,12))
+  X_row_vec = vector()
 }
 
 #Adding column of 1s for theta_0
@@ -61,15 +75,15 @@ mse_vec_training1=vector()
 pred_error_vec_training1=vector()
 
 burn_period_training1 = 1000
-sample_size_training1 = 500
+sample_size_training1 = 200
 diff_in_random_draws_training1 = 20
 #constant parameters values
 a_training1=10
 lambda_training1=1000
 
-rho_vec_tmp_training1 = c(1)#seq(0.1,1,0.1)
-rho_vec_sp_training1 = c(1)
-
+rho_vec_tmp_training1 = seq(0.1, 1, 0.3)
+rho_vec_sp_training1 = seq(0.1, 1, 0.3)
+                         
 for(rho_tmp in rho_vec_tmp_training1){
   for (rho_sp in rho_vec_sp_training1) {
    
@@ -84,30 +98,54 @@ for(rho_tmp in rho_vec_tmp_training1){
     sigma1_sq_training1 = 1
     sigma2_sq_training1 = 1
     
+    #time taken analysis for parameters
+    total_tt_v = 0
+    total_tt_theta = 0
+    total_tt_sigma1_sq = 0
+    total_tt_sigma2_sq = 0
+    
+    
     theta_sample_training1=vector()
     sigma1_sq_sample_training1=vector()
     sigma2_sq_sample_training1=vector()
     v_sample_training1=vector()
     for (i in (1:(burn_period_training1+sample_size_training1*diff_in_random_draws_training1))) {
       #v posterior
+      st_v = Sys.time()
+      
       v_covar_training1 = chol2inv((chol((inv_SIGMA_sp_kro_inv_SIGMA_tmp)/sigma1_sq_training1 + diag(n_training1)/sigma2_sq_training1)))
       v_mean_training1  = v_covar_training1 %*% ((y_training1-X_mat_training1 %*% theta_training1)/sigma2_sq_training1 )
       v_training1 = v_mean_training1 + t(chol(v_covar_training1))  %*% rnorm(n_training1)
       
+      total_tt_v = total_tt_v + (st_v - Sys.time())
+      
       #theta posterior
+      st_theta = Sys.time()
+      
       theta_covar_training1 = solve( (t(X_mat_training1) %*% X_mat_training1)/sigma2_sq_training1 + diag(p+1) ) 
       theta_mean_training1 = theta_covar_training1 %*% ( t(X_mat_training1) %*% (y_training1 - v_training1 ) )/sigma2_sq_training1
       theta_training1 = theta_mean_training1 + t(chol(theta_covar_training1)) %*%rnorm(p+1)
+      
+      total_tt_theta = total_tt_theta + (st_theta - Sys.time())
       #Sigma1^2 posterior
+      st_sigma1_sq = Sys.time()
+      
       sigma1_sq_a_training1 = a_training1 + n_training1/2
       sigma1_sq_lambda_training1 = (t(v_training1) %*% inv_SIGMA_sp_kro_inv_SIGMA_tmp %*% v_training1)/2 + lambda_training1
-      sigma1_sq_training1 = invgamma::rinvgamma(1,sigma1_sq_a_training1,rate = sigma1_sq_lambda_training1) 
+      sigma1_sq_training1 = invgamma::rinvgamma(1,sigma1_sq_a_training1,rate = sigma1_sq_lambda_training1)
+      
+      total_tt_sigma1_sq = total_tt_sigma1_sq + (st_sigma1_sq - Sys.time())
       #Sigma2^2 posterior
+      st_sigma2_sq = Sys.time()
+      
       sigma2_sq_a_training1 = a_training1 + n_training1/2
       temp_vec = y_training1 -X_mat_training1%*%theta_training1 - v_training1
       sigma2_sq_lambda_training1 = (t(temp_vec) %*% (temp_vec))/2 + lambda_training1
       sigma2_sq_training1 = invgamma::rinvgamma(1,sigma2_sq_a_training1,rate = sigma2_sq_lambda_training1)
       
+      total_tt_sigma2_sq = total_tt_sigma2_sq + (st_sigma2_sq - Sys.time())
+      
+      #Collecting samples for prediction
       if(i> burn_period_training1 & i%%diff_in_random_draws_training1 ==0){
         v_sample_training1 = cbind(v_sample_training1,v_training1)
         theta_sample_training1 = cbind(theta_sample_training1,theta_training1)
@@ -115,11 +153,211 @@ for(rho_tmp in rho_vec_tmp_training1){
         sigma2_sq_sample_training1 = c(sigma2_sq_sample_training1,sigma2_sq_training1)
       }
     }
+    #time analysis
+    avg_tt_v = total_tt_v / (burn_period_training1+sample_size_training1*diff_in_random_draws_training1)
+    avg_tt_theta = total_tt_theta / (burn_period_training1+sample_size_training1*diff_in_random_draws_training1)
+    avg_tt_sigma1_sq = total_tt_sigma1_sq / (burn_period_training1+sample_size_training1*diff_in_random_draws_training1)
+    avg_tt_sigma2_sq = total_tt_sigma2_sq / (burn_period_training1+sample_size_training1*diff_in_random_draws_training1)
     #estimation of y with the posterior parameters
-    estimated_y_training1 = X_mat_training1%*%rowMeans(theta_sample_training1) + rowMeans(v_sample_training1) + 
+    estimated_y_training1 = X_mat_training1 %*% rowMeans(theta_sample_training1) + rowMeans(v_sample_training1) + 
       rnorm(n_training1,mean = 0, sd= sqrt(mean(sigma2_sq_sample_training1)))
     mse_training1 = (sum((y_training1 - estimated_y_training1)^2))/n_training1
-    
+    mse_vec_training1 = c(mse_vec_training1, mse_training1)
     #Prediction
+    
+    X_mat_pred_training1 = vector()
+    for (j in (1:n_testing)) {
+      if(j %% n_tmp_testing == 0){
+        X_row_vec = c(testing$population[j],(n_tmp_training1+n_tmp_testing)/n_tmp_total)
+      }else{
+        X_row_vec = c(testing$population[j], (j %% n_tmp_training1 + n_tmp_training1)/n_tmp_total)
+      }
+      X_mat_pred_training1 = rbind(X_mat_pred_training1,X_row_vec)
+      X_row_vec = vector()
+    }
+    X_mat_pred_training1 = cbind(rep(1, n_testing), X_mat_pred_training1)
+    
+    
+    
+    v_pred_vec = vector()
+    for (pred_i in (1:n_testing)) {
+      Sigma_12_vec = vector()
+      for (j in (1:n_training1)) {
+        sp_dist = distm(c(training1$long[j],  training1$lat[j]), c(testing$long[pred_i], testing$lat), fun = distHaversine)
+        tmp_dist = abs((testing$week[pred_i] -  training1$week[j])/7)
+        Sigma_12_vec = c(Sigma_12_vec, exp(-rho_sp*  sp_dist) * exp(-rho_tmp * tmp_dist))
+      }
+      v_tmp_given_v1_covar = 1 - t(Sigma_12_vec) %*% inv_SIGMA_sp_kro_inv_SIGMA_tmp %*% Sigma_12_vec
+      v_tmp_given_v1_mean = t(Sigma_12_vec) %*% inv_SIGMA_sp_kro_inv_SIGMA_tmp %*% rowMeans(v_sample_training1)
+      v_tmp_given_v1 = v_tmp_given_v1_mean + sqrt(mean(sigma1_sq_sample_training1)) * t(chol(v_tmp_given_v1_covar)) * rnorm(1)
+      v_pred_vec = c(v_pred_vec, v_tmp_given_v1)
+    }
+    
+    #prediction errors
+    y2_given_y1 = X_mat_pred_training1%*% rowMeans(theta_sample_training1) + v_pred_vec + sqrt(mean(sigma2_sq_sample_training1))*rnorm(n_testing)
+    y2_pred_error = (sum((y_testing - y2_given_y1)^2))/n_testing
+    pred_error_vec_training1 = c(pred_error_vec_training1, y2_pred_error)
+  }
+}
+
+#estimating with training 2 data
+
+#training 2 data values
+y_training2 = 100*training2$log_incidence
+n_training2 = length(y_training2)
+n_sp_training2 = length(unique_state_lat_long$state)
+n_tmp_training2 = n_training2/n_sp_training2
+
+#X matrix for the model
+X_row_vec = vector()
+X_mat_training2 = vector()
+for (j in (1:n_training2)) {
+  if(j %% n_tmp_training2==0){
+    X_row_vec = c(training2$population[j],n_tmp_training2/n_tmp_total)
+  }else{
+    X_row_vec = c(training2$population[j], (j %% n_tmp_training2)/n_tmp_total)
+  }
+  X_mat_training2 = rbind(X_mat_training2,X_row_vec)
+  X_row_vec = vector()
+}
+
+#Adding column of 1s for theta_0
+X_mat_training2 = cbind(rep(1,n_training2),X_mat_training2)
+
+#Getting week difference mat for Sigma_T
+week_vec = 1:n_tmp_training2
+week_diff_mat = as.matrix(dist(week_vec,diag  =  TRUE,upper  =  TRUE))
+
+#Getting distance matrix
+unique_state_lat_long_training2 = unique(training2 %>% dplyr::select(state,lat,long))
+distance_mat_training2 = as.matrix(distm(cbind(unique_state_lat_long_training2$long,unique_state_lat_long_training2$lat), 
+                                         fun = distHaversine))
+
+mse_vec_training2=vector()
+pred_error_vec_training2=vector()
+
+burn_period_training2 = 1000
+sample_size_training2 = 200
+diff_in_random_draws_training2 = 20
+#constant parameters values
+a_training2=10
+lambda_training2=1000
+
+rho_vec_tmp_training2 = seq(0.1, 1, 0.3)
+rho_vec_sp_training2 = seq(0.1, 1, 0.3)
+
+for(rho_tmp in rho_vec_tmp_training2){
+  for (rho_sp in rho_vec_sp_training2) {
+    
+    SIGMA_sp = exp(-rho_sp*distance_mat_training2)
+    SIGMA_tmp = exp(-rho_tmp*week_diff_mat)
+    inv_SIGMA_sp = chol2inv(chol(SIGMA_sp))
+    inv_SIGMA_tmp = chol2inv(chol(SIGMA_tmp))
+    inv_SIGMA_sp_kro_inv_SIGMA_tmp = inv_SIGMA_sp %x% inv_SIGMA_tmp
+    #Giving values to different parameters of our model
+    v_training2 = rep(0,n_training2)
+    theta_training2 = rep(0,p+1)
+    sigma1_sq_training2 = 1
+    sigma2_sq_training2 = 1
+    
+    #time taken analysis for parameters
+    total_tt_v_training2 = 0
+    total_tt_theta_training2 = 0
+    total_tt_sigma1_sq_training2 = 0
+    total_tt_sigma2_sq_training2 = 0
+    
+    
+    theta_sample_training2=vector()
+    sigma1_sq_sample_training2=vector()
+    sigma2_sq_sample_training2=vector()
+    v_sample_training2=vector()
+    for (i in (1:(burn_period_training2+sample_size_training2*diff_in_random_draws_training2))) {
+      #v posterior
+      st_v = Sys.time()
+      
+      v_covar_training2 = chol2inv((chol((inv_SIGMA_sp_kro_inv_SIGMA_tmp)/sigma1_sq_training2 + diag(n_training2)/sigma2_sq_training2)))
+      v_mean_training2  = v_covar_training2 %*% ((y_training2-X_mat_training2 %*% theta_training2)/sigma2_sq_training2 )
+      v_training2 = v_mean_training2 + t(chol(v_covar_training2))  %*% rnorm(n_training2)
+      
+      total_tt_v_training2 = total_tt_v_training2 + (st_v - Sys.time())
+      
+      #theta posterior
+      st_theta = Sys.time()
+      
+      theta_covar_training2 = solve( (t(X_mat_training2) %*% X_mat_training2)/sigma2_sq_training2 + diag(p+1) ) 
+      theta_mean_training2 = theta_covar_training2 %*% ( t(X_mat_training2) %*% (y_training2 - v_training2 ) )/sigma2_sq_training2
+      theta_training2 = theta_mean_training2 + t(chol(theta_covar_training2)) %*%rnorm(p+1)
+      
+      total_tt_theta_training2 = total_tt_theta_training2 + (st_theta - Sys.time())
+      #Sigma1^2 posterior
+      st_sigma1_sq = Sys.time()
+      
+      sigma1_sq_a_training2 = a_training2 + n_training2/2
+      sigma1_sq_lambda_training2 = (t(v_training2) %*% inv_SIGMA_sp_kro_inv_SIGMA_tmp %*% v_training2)/2 + lambda_training2
+      sigma1_sq_training2 = invgamma::rinvgamma(1,sigma1_sq_a_training2,rate = sigma1_sq_lambda_training2)
+      
+      total_tt_sigma1_sq_training2 = total_tt_sigma1_sq_training2 + (st_sigma1_sq - Sys.time())
+      #Sigma2^2 posterior
+      st_sigma2_sq = Sys.time()
+      
+      sigma2_sq_a_training2 = a_training2 + n_training2/2
+      temp_vec = y_training2 -X_mat_training2%*%theta_training2 - v_training2
+      sigma2_sq_lambda_training2 = (t(temp_vec) %*% (temp_vec))/2 + lambda_training2
+      sigma2_sq_training2 = invgamma::rinvgamma(1,sigma2_sq_a_training2,rate = sigma2_sq_lambda_training2)
+      
+      total_tt_sigma2_sq_training2 = total_tt_sigma2_sq_training2 + (st_sigma2_sq - Sys.time())
+      
+      #Collecting samples for prediction
+      if(i> burn_period_training2 & i%%diff_in_random_draws_training2 ==0){
+        v_sample_training2 = cbind(v_sample_training2,v_training2)
+        theta_sample_training2 = cbind(theta_sample_training2,theta_training2)
+        sigma1_sq_sample_training2 = c(sigma1_sq_sample_training2,sigma1_sq_training2)
+        sigma2_sq_sample_training2 = c(sigma2_sq_sample_training2,sigma2_sq_training2)
+      }
+    }
+    #time analysis
+    avg_tt_v = total_tt_v_training2 / (burn_period_training2+sample_size_training2*diff_in_random_draws_training2)
+    avg_tt_theta = total_tt_theta_training2 / (burn_period_training2+sample_size_training2*diff_in_random_draws_training2)
+    avg_tt_sigma1_sq = total_tt_sigma1_sq_training2 / (burn_period_training2+sample_size_training2*diff_in_random_draws_training2)
+    avg_tt_sigma2_sq = total_tt_sigma2_sq_training2 / (burn_period_training2+sample_size_training2*diff_in_random_draws_training2)
+    #estimation of y with the posterior parameters
+    estimated_y_training2 = X_mat_training2 %*% rowMeans(theta_sample_training2) + rowMeans(v_sample_training2) + 
+      rnorm(n_training2,mean = 0, sd= sqrt(mean(sigma2_sq_sample_training2)))
+    mse_training2 = (sum((y_training2 - estimated_y_training2)^2))/n_training2
+    mse_vec_training2 = c(mse_vec_training2, mse_training2)
+    #Prediction
+    
+    X_mat_pred_training2 = vector()
+    for (j in (1:n_testing)) {
+      if(j %% n_tmp_testing == 0){
+        X_row_vec = c(testing$population[j],(n_tmp_training2+n_tmp_testing)/n_tmp_total)
+      }else{
+        X_row_vec = c(testing$population[j], (j %% n_tmp_training2 + n_tmp_training2)/n_tmp_total)
+      }
+      X_mat_pred_training2 = rbind(X_mat_pred_training2,X_row_vec)
+      X_row_vec = vector()
+    }
+    X_mat_pred_training2 = cbind(rep(1, n_testing), X_mat_pred_training2)
+    
+    
+    
+    v_pred_vec = vector()
+    for (pred_i in (1:n_testing)) {
+      Sigma_12_vec = vector()
+      for (j in (1:n_training2)) {
+        sp_dist = distm(c(training2$long[j],  training2$lat[j]), c(testing$long[pred_i], testing$lat), fun = distHaversine)
+        tmp_dist = abs((testing$week[pred_i] -  training2$week[j])/7)
+        Sigma_12_vec = c(Sigma_12_vec, exp(-rho_sp*  sp_dist) * exp(-rho_tmp * tmp_dist))
+      }
+      v_tmp_given_v1_covar = 1 - t(Sigma_12_vec) %*% inv_SIGMA_sp_kro_inv_SIGMA_tmp %*% Sigma_12_vec
+      v_tmp_given_v1_mean = t(Sigma_12_vec) %*% inv_SIGMA_sp_kro_inv_SIGMA_tmp %*% rowMeans(v_sample_training2)
+      v_tmp_given_v1 = v_tmp_given_v1_mean + sqrt(mean(sigma1_sq_sample_training2)) * t(chol(v_tmp_given_v1_covar)) * rnorm(1)
+      v_pred_vec = c(v_pred_vec, v_tmp_given_v1)
+    }
+    
+    #prediction errors
+    y2_given_y1 = X_mat_pred_training2%*% rowMeans(theta_sample_training2) + v_pred_vec + sqrt(mean(sigma2_sq_sample_training2))*rnorm(n_testing)
+    y2_pred_error = (sum((y_testing - y2_given_y1)^2))/n_testing
+    pred_error_vec_training2 = c(pred_error_vec_training2, y2_pred_error)
   }
 }
