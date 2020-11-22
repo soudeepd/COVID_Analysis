@@ -11,61 +11,6 @@ library(matrixcalc)
 library(MASS)
 library(mnormt)
 
-set.seed(2020)
-
-# read the statewise weekly data
-df = read.csv(file = "D:/Term5/IS&RA/gitrepo/COVID_Analysis/Code/US_statewise_weekly.csv")
-
-# check class of the columns in the data and change their class if needed
-sapply(df,class) 
-df = df %>% 
-  mutate_if(is.factor,as.character) %>% 
-  mutate(
-    week = as.Date(week)
-  )
-
-#Adding columns to Data
-n = length(df$country)
-n_sp = length(unique(df$state))
-n_tmp = n/n_sp
-
-time_vec = vector()
-time_sq_vec = vector()
-y_st_vec = vector()
-for (j in (1:n)) {
-  if(j %% n_tmp==0){
-    temp_var = 1
-    y_st = df$log_prevalence[j-1]
-  }else if(j %% n_tmp == 1){
-    temp_var = (j %% n_tmp)/n_tmp
-    y_st = 0
-  }else{
-    temp_var = (j %% n_tmp)/n_tmp
-    y_st = df$log_prevalence[j-1]
-  }
-  time_vec = c(time_vec, temp_var)
-  time_sq_vec = c(time_sq_vec, temp_var^2)
-  y_st_vec = c(y_st_vec, y_st)
-}
-
-df$time = time_vec
-df$time_sq = time_sq_vec
-df$prev_log_prevalence = y_st_vec
-
-# case1: use all but two random locations as training and last four weeks as test set 
-# case2: use all locations for training and last four weeks as test set 
-test_loc = sample(unique(df$state),2)
-test_wk_min = max(df$week) - 56
-validation_wk_min = max(df$week) - 84
-training1 = df %>% filter(! state %in% test_loc & week <= validation_wk_min)
-training2 = df %>% filter(week <= validation_wk_min)
-validation1 = df %>% filter(! state %in% test_loc & week > validation_wk_min & week <= test_wk_min)
-validation2 = df %>% filter( week > validation_wk_min & week <= test_wk_min)
-testing = df %>% filter(week > test_wk_min)
-full_training1 = df %>% filter(! state %in% test_loc & week <= test_wk_min)
-full_training2 = df %>% filter(week <= test_wk_min)
-
-
 #estimating with the first training data
 unique_state_lat_long = unique(training1 %>% dplyr::select(state,lat,long))
 distance_mat_training1 = as.matrix(distm(cbind(unique_state_lat_long$long,unique_state_lat_long$lat), fun = distHaversine))
@@ -287,7 +232,7 @@ for(rho_tmp in rho_vec_tmp_training1){
       v_tmp_given_v1 = v_tmp_given_v1_mean + sqrt(mean(sigma1_sq_sample_training1)) * t(chol(v_tmp_given_v1_covar)) * rnorm(1)
       if(pred_i %% n_tmp_validation1 == 1){
         X_vec_tmp = c(1, log(validation1$population[pred_i]), validation1$time[pred_i], validation1$time_sq[pred_i], 
-                      validation1$prev_log_prevalence[pred_i])
+                      100*validation1$prev_log_prevalence[pred_i])
       }else{
         X_vec_tmp = c(1, log(validation1$population[pred_i]), validation1$time[pred_i], validation1$time_sq[pred_i],
                       y_pred_val_vec[pred_i - 1])
@@ -732,7 +677,7 @@ for(rho_tmp in rho_vec_tmp_training2){
       v_tmp_given_v1 = v_tmp_given_v1_mean + sqrt(mean(sigma1_sq_sample_training2)) * t(chol(v_tmp_given_v1_covar)) * rnorm(1)
       if(pred_i %% n_tmp_validation2 == 1){
         X_vec_tmp = c(1, log(validation2$population[pred_i]), validation2$time[pred_i], validation2$time_sq[pred_i], 
-                      validation2$prev_log_prevalence[pred_i])
+                      100*validation2$prev_log_prevalence[pred_i])
       }else{
         X_vec_tmp = c(1, log(validation2$population[pred_i]), validation2$time[pred_i], validation2$time_sq[pred_i], 
                       y_pred_val_vec_training2[pred_i - 1])
@@ -946,7 +891,7 @@ for (pred_i in (1:n_testing)) {
   v_pred_test_vec_training2 = c(v_pred_test_vec_training2, v_tmp_given_v1)
   if(pred_i %% n_tmp_testing == 1){
     X_vec_tmp = c(1, log(testing$population[pred_i]), testing$time[pred_i], testing$time_sq[pred_i], 
-                  testing$prev_log_prevalence[pred_i])
+                  100*testing$prev_log_prevalence[pred_i])
   }else{
     X_vec_tmp = c(1, log(testing$population[pred_i]), testing$time[pred_i], testing$time_sq[pred_i], 
                   y_pred_test_vec_training2[pred_i - 1])
@@ -961,32 +906,17 @@ mape_prediction_test_training2 = (sum(abs( (y_testing - y_pred_test_vec_training
 
 
 ###################################################################################################################################
-#Fitting Auto ARIMA model
 
-library(forecast)
 
-Xreg  = cbind(log(full_training2$population), full_training2$time, full_training2$time_sq, 
-              100*(full_training2$prev_log_prevalence))
-y_pred_arima_mat = vector()
-for (loc in (1:n_sp_full_training2)) {
-  #fitting auto arima
-  fit = auto.arima(y_full_training2[((loc - 1)*n_tmp_full_training2+1):(loc*n_tmp_full_training2)], seasonal = FALSE, 
-                   xreg = Xreg[(((loc - 1)*n_tmp_full_training2+1):(loc*n_tmp_full_training2)),])
-  
-  #Forecasting using the fitted model on forecast at a time
-  y_pred_arima_vec = vector()
-  for (pred_i in (1:n_tmp_testing)) {
-    if(pred_i %% n_tmp_testing == 1){
-      X_vec_tmp = t(c(log(testing$population[pred_i]), testing$time[pred_i], testing$time_sq[pred_i], 
-                      testing$prev_log_prevalence[pred_i]))
-    }else{
-      X_vec_tmp = t(c(log(testing$population[pred_i]), testing$time[pred_i], testing$time_sq[pred_i], 
-                      y_pred_arima_vec[pred_i - 1]))
-    }
-    y_pred_arima = forecast(fit, xreg = X_vec_tmp)
-    y_pred_arima_vec = c(y_pred_arima_vec, y_pred_arima$mean[1])
-  }
-  y_pred_arima_mat = cbind(y_pred_arima_mat, y_pred_arima_vec)
+#Adding columns for fitted and predicted values
+log_prev_model_vec = vector()#c(estimated_y_full_training2, y_pred_test_vec_training2)
+is_trained_vec = c(rep(1,n_full_training2),rep(0,n_testing))
+for (loc in (1:n_sp)) {
+  log_prev_model_vec = c(log_prev_model_vec, 
+                         estimated_y_full_training2[(((loc - 1)*n_tmp_full_training2+1):(loc*n_tmp_full_training2))],
+                         y_pred_test_vec_training2[(((loc - 1)*n_tmp_testing+1):(loc*n_tmp_testing))])
 }
-#Mape for predicted values
-mape_pred_arima = (sum(abs( (y_testing - y_pred_arima_mat[1:(n_sp_full_training2*n_tmp_testing)])/y_testing )))/n_testing
+df$is_trained = is_trained_vec
+df$log_prev_model_values = log_prev_model_vec
+
+write.csv(df,"D:/Term5/IS&RA/US_statewise_weekly_withfitted_model.csv",row.names = FALSE)
