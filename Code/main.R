@@ -916,6 +916,7 @@ for (loc in (1:n_sp)) {
                          estimated_y_full_training2[(((loc - 1)*n_tmp_full_training2+1):(loc*n_tmp_full_training2))],
                          y_pred_test_vec_training2[(((loc - 1)*n_tmp_testing+1):(loc*n_tmp_testing))])
 }
+log_prev_model_vec = log_prev_model_vec/100
 df$is_trained = is_trained_vec
 df$log_prev_model_values = log_prev_model_vec
 
