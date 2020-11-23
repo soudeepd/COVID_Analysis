@@ -11,32 +11,6 @@ library(matrixcalc)
 library(MASS)
 library(mnormt)
 
-set.seed(2020)
-
-# read the statewise weekly data
-df = read.csv(file = "D:/Term5/IS&RA/gitrepo/COVID_Analysis/Code/US_statewise_weekly.csv")
-
-# check class of the columns in the data and change their class if needed
-sapply(df,class) 
-df = df %>% 
-  mutate_if(is.factor,as.character) %>% 
-  mutate(
-    week = as.Date(week)
-  )
-
-# case1: use all but two random locations as training and last four weeks as test set 
-# case2: use all locations for training and last four weeks as test set 
-test_loc = sample(unique(df$state),2)
-test_wk_min = max(df$week) - 56
-validation_wk_min = max(df$week) - 84
-training1 = df %>% filter(! state %in% test_loc & week <= test_wk_min)
-training2 = df %>% filter(week <= validation_wk_min)
-validation1 = df %>% filter(! state %in% test_loc & week > validation_wk_min & week <= test_wk_min)
-validation2 = df %>% filter( week > validation_wk_min & week <= test_wk_min)
-testing = df %>% filter(week > test_wk_min)
-
-
-
 #estimating with the first training data
 unique_state_lat_long = unique(training1 %>% dplyr::select(state,lat,long))
 distance_mat_training1 = as.matrix(distm(cbind(unique_state_lat_long$long,unique_state_lat_long$lat), fun = distHaversine))
@@ -61,25 +35,8 @@ n_sp_testing = length(unique(testing$state))
 n_tmp_testing = n_testing/ n_sp_testing
 p=4
 #X matrix for the model
-X_row_vec = vector()
-X_mat_training1 = vector()
-for (j in (1:n_training1)) {
-  if(j %% n_tmp_training1==0){
-    temp_var = n_tmp_training1/n_tmp_total
-    X_row_vec = c(log(training1$population[j]), temp_var, temp_var^2, y_training1[j-1]) #
-  }else if(j %% n_tmp_training1==1){
-    temp_var = (j %% n_tmp_training1)/n_tmp_total
-    X_row_vec = c(log(training1$population[j]), temp_var, temp_var^2, 0) #No info about 
-  }else{
-    temp_var = (j %% n_tmp_training1)/n_tmp_total
-    X_row_vec = c(log(training1$population[j]), temp_var, temp_var^2, y_training1[j-1])
-  }
-  X_mat_training1 = rbind(X_mat_training1,X_row_vec)
-  X_row_vec = vector()
-}
-
-#Adding column of 1s for theta_0
-X_mat_training1 = cbind(rep(1,n_training1),X_mat_training1)
+X_mat_training1 = cbind(rep(1,n_training1), log(training1$population), training1$time, training1$time_sq, 
+                        100*(training1$prev_log_prevalence))
 
 #Getting week difference mat for Sigma_T
 week_vec = 1:n_tmp_training1
@@ -273,55 +230,34 @@ for(rho_tmp in rho_vec_tmp_training1){
       v_tmp_given_v1_covar = 1 - t(Sigma_12_vec) %*% inv_SIGMA_sp_kro_inv_SIGMA_tmp_training1 %*% Sigma_12_vec
       v_tmp_given_v1_mean = t(Sigma_12_vec) %*% inv_SIGMA_sp_kro_inv_SIGMA_tmp_training1 %*% rowMeans(v_sample_training1)
       v_tmp_given_v1 = v_tmp_given_v1_mean + sqrt(mean(sigma1_sq_sample_training1)) * t(chol(v_tmp_given_v1_covar)) * rnorm(1)
-      if(pred_i %% n_tmp_validation1 == 0){
-        temp_var = (n_tmp_training1+n_tmp_validation1)/n_tmp_total
-        X_vec_tmp = c(1, log(validation1$population[pred_i]), temp_var, temp_var^2, y_pred_val_vec[pred_i - 1])
-      }else if(pred_i %% n_tmp_validation1 == 1){
-        temp_var = (pred_i %% n_tmp_validation1 + n_tmp_training1 )/n_tmp_total
-        X_vec_tmp = c(1, log(validation1$population[pred_i]), temp_var, temp_var^2, 
-                      y_training1[(floor(pred_i/n_tmp_validation1)+1)*n_tmp_training1 - 1])
+      if(pred_i %% n_tmp_validation1 == 1){
+        X_vec_tmp = c(1, log(validation1$population[pred_i]), validation1$time[pred_i], validation1$time_sq[pred_i], 
+                      100*validation1$prev_log_prevalence[pred_i])
       }else{
-        temp_var = (pred_i %% n_tmp_validation1 + n_tmp_training1 )/n_tmp_total
-        X_vec_tmp = c(1, log(validation1$population[pred_i]), temp_var, temp_var^2, y_pred_val_vec[pred_i - 1])
+        X_vec_tmp = c(1, log(validation1$population[pred_i]), validation1$time[pred_i], validation1$time_sq[pred_i],
+                      y_pred_val_vec[pred_i - 1])
       }
       y_pred_val = t(X_vec_tmp) %*% rowMeans(theta_sample_training1) + v_tmp_given_v1 + 
         sqrt(mean(sigma2_sq_sample_training1))*rnorm(1)
       v_pred_val_vec = c(v_pred_val_vec, v_tmp_given_v1)
       y_pred_val_vec = c(y_pred_val_vec, y_pred_val)
     }
-    mape_validation = (sum(abs( (y_validation1 - y_pred_val)/y_validation1 )))/n_validation1
+    mape_validation = (sum(abs( (y_validation1 - y_pred_val_vec)/y_validation1 )))/n_validation1
     mape_vec_validation_training1 = c(mape_vec_validation_training1, mape_validation)
     
   }
 }
 #Prediction
 #training 1 data values
-full_training1 = df %>% filter(week <= test_wk_min)
+
 y_full_training1 = 100*full_training1$log_prevalence
 n_full_training1 = length(y_full_training1)
 n_sp_full_training1 = length(unique(full_training1$state))
 n_tmp_full_training1 = n_full_training1/n_sp_full_training1
-max_pop_full_training1 = max(full_training1$population)
 
-X_row_vec = vector()
-X_mat_full_training1 = vector()
-for (j in (1:n_full_training1)) {
-  if(j %% n_tmp_full_training1==0){
-    temp_var = n_tmp_full_training1/n_tmp_total
-    X_row_vec = c(log(full_training1$population[j]), temp_var, temp_var^2, y_full_training1[j-1]) #
-  }else if(j %% n_tmp_full_training1==1){
-    temp_var = (j %% n_tmp_full_training1)/n_tmp_total
-    X_row_vec = c(log(full_training1$population[j]), temp_var, temp_var^2, 0) #No info about 
-  }else{
-    temp_var = (j %% n_tmp_full_training1)/n_tmp_total
-    X_row_vec = c(log(full_training1$population[j]), temp_var, temp_var^2, y_full_training1[j-1])
-  }
-  X_mat_full_training1 = rbind(X_mat_full_training1,X_row_vec)
-  X_row_vec = vector()
-}
-
-#Adding column of 1s for theta_0
-X_mat_full_training1 = cbind(rep(1,n_full_training1),X_mat_full_training1)
+#X mat full training
+X_mat_full_training1 = cbind(rep(1,n_full_training1), log(full_training1$population), full_training1$time, full_training1$time_sq, 
+                             100*(full_training1$prev_log_prevalence))
 
 #Getting week difference mat for Sigma_T
 week_vec = 1:n_tmp_full_training1
@@ -337,7 +273,7 @@ mape_vec_validation_full_training1 = vector()
 #pred_error_vec_full_training1 = vector()
 
 burn_period_full_training1 = 1000
-sample_size_full_training1 = 500
+sample_size_full_training1 = 5000
 diff_in_random_draws_full_training1 = 20
 #Getting sample means for every rho
 v_sample_mean_full_training1 = vector()
@@ -480,22 +416,22 @@ mape_full_training1 = (sum(abs( (y_full_training1 - estimated_y_full_training1)/
 mape_vec_training_full_training1 = c(mape_vec_training_full_training1, mape_full_training1)
 
 #Testing for significance
-significance_vec=vector()
-significance_vec = c(significance_vec, unname(!(0 >= quantile(theta_sample_full_training1[1,], 0.025) & 
-                                                  0 <= quantile(theta_sample_full_training1[1,], 0.975))))
-significance_vec = c(significance_vec, unname(!(0 >= quantile(theta_sample_full_training1[2,], 0.025) & 
-                                                  0 <= quantile(theta_sample_full_training1[2,], 0.975))))
-significance_vec = c(significance_vec, unname(!(0 >= quantile(theta_sample_full_training1[3,], 0.025) & 
-                                                  0 <= quantile(theta_sample_full_training1[3,], 0.975))))
-significance_vec = c(significance_vec, unname(!(0 >= quantile(theta_sample_full_training1[4,], 0.025) & 
-                                                  0 <= quantile(theta_sample_full_training1[4,], 0.975))))
-significance_vec = c(significance_vec, unname(!(0 >= quantile(theta_sample_full_training1[5,], 0.025) & 
-                                                  0 <= quantile(theta_sample_full_training1[5,], 0.975))))
+significance_vec_full_training1 = vector()
+significance_vec_full_training1 = c(significance_vec_full_training1, unname(!(0 >= quantile(theta_sample_full_training1[1,], 0.025) & 
+                                                                                0 <= quantile(theta_sample_full_training1[1,], 0.975))))
+significance_vec_full_training1 = c(significance_vec_full_training1, unname(!(0 >= quantile(theta_sample_full_training1[2,], 0.025) & 
+                                                                                0 <= quantile(theta_sample_full_training1[2,], 0.975))))
+significance_vec_full_training1 = c(significance_vec_full_training1, unname(!(0 >= quantile(theta_sample_full_training1[3,], 0.025) & 
+                                                                                0 <= quantile(theta_sample_full_training1[3,], 0.975))))
+significance_vec_full_training1 = c(significance_vec_full_training1, unname(!(0 >= quantile(theta_sample_full_training1[4,], 0.025) & 
+                                                                                0 <= quantile(theta_sample_full_training1[4,], 0.975))))
+significance_vec_full_training1 = c(significance_vec_full_training1, unname(!(0 >= quantile(theta_sample_full_training1[5,], 0.025) & 
+                                                                                0 <= quantile(theta_sample_full_training1[5,], 0.975))))
 #Pred
 
 
-v_pred_test_vec = vector()
-y_pred_test_vec = vector()
+v_pred_test_vec_training1 = vector()
+y_pred_test_vec_training1 = vector()
 for (pred_i in (1:n_testing)) {
   Sigma_12_vec = vector()
   for (j in (1:n_full_training1)) {
@@ -506,25 +442,21 @@ for (pred_i in (1:n_testing)) {
   v_tmp_given_v1_covar = 1 - t(Sigma_12_vec) %*% inv_SIGMA_sp_kro_inv_SIGMA_tmp_full_training1 %*% Sigma_12_vec
   v_tmp_given_v1_mean = t(Sigma_12_vec) %*% inv_SIGMA_sp_kro_inv_SIGMA_tmp_full_training1 %*% rowMeans(v_sample_full_training1)
   v_tmp_given_v1 = v_tmp_given_v1_mean + sqrt(mean(sigma1_sq_sample_full_training1)) * t(chol(v_tmp_given_v1_covar)) * rnorm(1)
-  v_pred_test_vec = c(v_pred_test_vec, v_tmp_given_v1)
-  if(pred_i %% n_tmp_testing == 0){
-    temp_var = (n_tmp_full_training1+n_tmp_testing)/n_tmp_total
-    X_vec_tmp = c(1, sqrt(testing$population[pred_i]/max_pop_testing), temp_var, temp_var^2, y_pred_test_vec[pred_i - 1])
-  }else if(pred_i %% n_tmp_testing == 1){
-    temp_var = (pred_i %% n_tmp_testing + n_tmp_full_training1 )/n_tmp_total
-    X_vec_tmp = c(1, sqrt(testing$population[pred_i]/max_pop_testing), temp_var, temp_var^2, 
-                  y_full_training1[(floor(pred_i/n_tmp_testing)+1)*n_tmp_full_training1 - 1])
+  v_pred_test_vec_training1 = c(v_pred_test_vec_training1, v_tmp_given_v1)
+  if(pred_i %% n_tmp_testing == 1){
+    X_vec_tmp = c(1, log(testing$population[pred_i]), testing$time[pred_i], testing$time_sq[pred_i], 
+                  100*testing$prev_log_prevalence[pred_i]) 
   }else{
-    temp_var = (pred_i %% n_tmp_testing + n_tmp_training1 )/n_tmp_total
-    X_vec_tmp = c(1, sqrt(testing$population[pred_i]/max_pop_testing), temp_var, temp_var^2, y_pred_test_vec[pred_i - 1])
+    X_vec_tmp = c(1, log(testing$population[pred_i]), testing$time[pred_i], testing$time_sq[pred_i], 
+                  y_pred_test_vec_training1[pred_i - 1])
   }
   y_pred_test = X_vec_tmp %*% rowMeans(theta_sample_full_training1) + v_tmp_given_v1 + sqrt(mean(sigma2_sq_sample_full_training1))*rnorm(1)
   v_pred_val_vec = c(v_pred_val_vec, v_tmp_given_v1)
-  y_pred_test_vec = c(y_pred_test_vec, y_pred_test)
+  y_pred_test_vec_training1 = c(y_pred_test_vec_training1, y_pred_test)
 }
 
 #prediction errors
-mape_prediction_test = (sum(abs( (y_testing - y_pred_test_vec)/y_testing )))/n_testing
+mape_prediction_test_training1 = (sum(abs( (y_testing - y_pred_test_vec_training1)/y_testing )))/n_testing
 ####################################################################################################################################
 #estimating with training 2 data
 
@@ -550,25 +482,8 @@ n_sp_testing = length(unique(testing$state))
 n_tmp_testing = n_testing/ n_sp_testing
 p=4
 #X matrix for the model
-X_row_vec = vector()
-X_mat_training2 = vector()
-for (j in (1:n_training2)) {
-  if(j %% n_tmp_training2==0){
-    temp_var = n_tmp_training2/n_tmp_total
-    X_row_vec = c(log(training2$population[j]), temp_var, temp_var^2, y_training2[j-1]) #
-  }else if(j %% n_tmp_training2==1){
-    temp_var = (j %% n_tmp_training2)/n_tmp_total
-    X_row_vec = c(log(training2$population[j]), temp_var, temp_var^2, 0) #No info about 
-  }else{
-    temp_var = (j %% n_tmp_training2)/n_tmp_total
-    X_row_vec = c(log(training2$population[j]), temp_var, temp_var^2, y_training2[j-1])
-  }
-  X_mat_training2 = rbind(X_mat_training2,X_row_vec)
-  X_row_vec = vector()
-}
-
-#Adding column of 1s for theta_0
-X_mat_training2 = cbind(rep(1,n_training2),X_mat_training2)
+X_mat_training2 = cbind(rep(1,n_training2), log(training2$population), training2$time, training2$time_sq, 
+                        100*(training2$prev_log_prevalence))
 
 #Getting week difference mat for Sigma_T
 week_vec = 1:n_tmp_training2
@@ -729,18 +644,18 @@ for(rho_tmp in rho_vec_tmp_training2){
     mape_vec_training_training2 = c(mape_vec_training_training2, mape_training2)
     
     #Testing for significance
-    significance_vec=vector()
-    significance_vec = c(significance_vec, unname(!(0 >= quantile(theta_sample_training2[1,], 0.025) & 
-                                             0 <= quantile(theta_sample_training2[1,], 0.975))))
-    significance_vec = c(significance_vec, unname(!(0 >= quantile(theta_sample_training2[2,], 0.025) & 
-                                                    0 <= quantile(theta_sample_training2[2,], 0.975))))
-    significance_vec = c(significance_vec, unname(!(0 >= quantile(theta_sample_training2[3,], 0.025) & 
-                                                    0 <= quantile(theta_sample_training2[3,], 0.975))))
-    significance_vec = c(significance_vec, unname(!(0 >= quantile(theta_sample_training2[4,], 0.025) & 
-                                                    0 <= quantile(theta_sample_training2[4,], 0.975))))
-    significance_vec = c(significance_vec, unname(!(0 >= quantile(theta_sample_training2[5,], 0.025) & 
-                                                    0 <= quantile(theta_sample_training2[5,], 0.975))))
-    theta_significance_training2 = cbind(theta_significance_training2, significance_vec)
+    significance_vec_training2 = vector()
+    significance_vec_training2 = c(significance_vec_training2, unname(!(0 >= quantile(theta_sample_training2[1,], 0.025) & 
+                                                                          0 <= quantile(theta_sample_training2[1,], 0.975))))
+    significance_vec_training2 = c(significance_vec_training2, unname(!(0 >= quantile(theta_sample_training2[2,], 0.025) & 
+                                                                          0 <= quantile(theta_sample_training2[2,], 0.975))))
+    significance_vec_training2 = c(significance_vec_training2, unname(!(0 >= quantile(theta_sample_training2[3,], 0.025) & 
+                                                                          0 <= quantile(theta_sample_training2[3,], 0.975))))
+    significance_vec_training2 = c(significance_vec_training2, unname(!(0 >= quantile(theta_sample_training2[4,], 0.025) & 
+                                                                          0 <= quantile(theta_sample_training2[4,], 0.975))))
+    significance_vec_training2 = c(significance_vec_training2, unname(!(0 >= quantile(theta_sample_training2[5,], 0.025) & 
+                                                                          0 <= quantile(theta_sample_training2[5,], 0.975))))
+    theta_significance_training2 = cbind(theta_significance_training2, significance_vec_training2)
     #Saving value for sample means
     v_sample_mean_training2 = cbind(v_sample_mean_training2, rowMeans(v_sample_training2))
     theta_sample_mean_training2 = cbind(theta_sample_mean_training2, rowMeans(theta_sample_training2))
@@ -748,8 +663,8 @@ for(rho_tmp in rho_vec_tmp_training2){
     sigma2_sq_sample_mean_training2 = c(sigma2_sq_sample_mean_training2, mean(sigma2_sq_sample_training2))
     
     #Validation
-    v_pred_val_vec = vector()
-    y_pred_val_vec = vector()
+    v_pred_val_vec_training2 = vector()
+    y_pred_val_vec_training2 = vector()
     for (pred_i in (1:n_validation2)) {
       Sigma_12_vec = vector()
       for (j in (1:n_training2)) {
@@ -760,22 +675,18 @@ for(rho_tmp in rho_vec_tmp_training2){
       v_tmp_given_v1_covar = 1 - t(Sigma_12_vec) %*% inv_SIGMA_sp_kro_inv_SIGMA_tmp_training2 %*% Sigma_12_vec
       v_tmp_given_v1_mean = t(Sigma_12_vec) %*% inv_SIGMA_sp_kro_inv_SIGMA_tmp_training2 %*% rowMeans(v_sample_training2)
       v_tmp_given_v1 = v_tmp_given_v1_mean + sqrt(mean(sigma1_sq_sample_training2)) * t(chol(v_tmp_given_v1_covar)) * rnorm(1)
-      if(pred_i %% n_tmp_validation2 == 0){
-        temp_var = (n_tmp_training2+n_tmp_validation2)/n_tmp_total
-        X_vec_tmp = c(1, log(validation2$population[pred_i]), temp_var, temp_var^2, y_pred_val_vec[pred_i - 1])
-      }else if(pred_i %% n_tmp_validation2 == 1){
-        temp_var = (pred_i %% n_tmp_validation2 + n_tmp_training2 )/n_tmp_total
-        X_vec_tmp = c(1, log(validation2$population[pred_i]), temp_var, temp_var^2, 
-                       y_training2[(floor(pred_i/n_tmp_validation2)+1)*n_tmp_training2 - 1])
+      if(pred_i %% n_tmp_validation2 == 1){
+        X_vec_tmp = c(1, log(validation2$population[pred_i]), validation2$time[pred_i], validation2$time_sq[pred_i], 
+                      100*validation2$prev_log_prevalence[pred_i])
       }else{
-        temp_var = (pred_i %% n_tmp_validation2 + n_tmp_training2 )/n_tmp_total
-        X_vec_tmp = c(1, log(validation2$population[pred_i]), temp_var, temp_var^2, y_pred_val_vec[pred_i - 1])
+        X_vec_tmp = c(1, log(validation2$population[pred_i]), validation2$time[pred_i], validation2$time_sq[pred_i], 
+                      y_pred_val_vec_training2[pred_i - 1])
       }
       y_pred_val = X_vec_tmp %*% rowMeans(theta_sample_training2) + v_tmp_given_v1 + sqrt(mean(sigma2_sq_sample_training2))*rnorm(1)
-      v_pred_val_vec = c(v_pred_val_vec, v_tmp_given_v1)
-      y_pred_val_vec = c(y_pred_val_vec, y_pred_val)
+      v_pred_val_vec_training2 = c(v_pred_val_vec_training2, v_tmp_given_v1)
+      y_pred_val_vec_training2 = c(y_pred_val_vec_training2, y_pred_val)
     }
-    mape_validation = (sum(abs( (y_validation2 - y_pred_val_vec)/y_validation2 )))/n_validation2
+    mape_validation = (sum(abs( (y_validation2 - y_pred_val_vec_training2)/y_validation2 )))/n_validation2
     mape_vec_validation_training2 = c(mape_vec_validation_training2, mape_validation)
   }
 }
@@ -784,31 +695,15 @@ for(rho_tmp in rho_vec_tmp_training2){
 
 
 #training 2 data values
-full_training2 = df %>% filter(week <= test_wk_min)
+
 y_full_training2 = 100*full_training2$log_prevalence
 n_full_training2 = length(y_full_training2)
 n_sp_full_training2 = length(unique(full_training2$state))
 n_tmp_full_training2 = n_full_training2/n_sp_full_training2
 #X matrix for the model
-X_row_vec = vector()
-X_mat_full_training2 = vector()
-for (j in (1:n_full_training2)) {
-  if(j %% n_tmp_full_training2==0){
-    temp_var = n_tmp_full_training2/n_tmp_total
-    X_row_vec = c(log(full_training2$population[j]), temp_var, temp_var^2, y_full_training2[j-1]) #
-  }else if(j %% n_tmp_full_training2==1){
-    temp_var = (j %% n_tmp_full_training2)/n_tmp_total
-    X_row_vec = c(log(full_training2$population[j]), temp_var, temp_var^2, 0) #No info about 
-  }else{
-    temp_var = (j %% n_tmp_full_training2)/n_tmp_total
-    X_row_vec = c(log(full_training2$population[j]), temp_var, temp_var^2, y_full_training2[j-1])
-  }
-  X_mat_full_training2 = rbind(X_mat_full_training2,X_row_vec)
-  X_row_vec = vector()
-}
+X_mat_full_training2 = cbind(rep(1,n_full_training2), log(full_training2$population), full_training2$time, full_training2$time_sq, 
+                             100*(full_training2$prev_log_prevalence))
 
-#Adding column of 1s for theta_0
-X_mat_full_training2 = cbind(rep(1,n_full_training2),X_mat_full_training2)
 
 #Getting week difference mat for Sigma_T
 week_vec = 1:n_tmp_full_training2
@@ -967,22 +862,22 @@ mape_full_training2 = (sum(abs( (y_full_training2 - estimated_y_full_training2)/
 mape_vec_training_full_training2 = c(mape_vec_training_full_training2, mape_full_training2)
 
 #Testing for significance
-significance_vec=vector()
-significance_vec = c(significance_vec, unname(!(0 >= quantile(theta_sample_full_training2[1,], 0.025) & 
+significance_vec_full_training2=vector()
+significance_vec_full_training2 = c(significance_vec_full_training2, unname(!(0 >= quantile(theta_sample_full_training2[1,], 0.025) & 
                                                   0 <= quantile(theta_sample_full_training2[1,], 0.975))))
-significance_vec = c(significance_vec, unname(!(0 >= quantile(theta_sample_full_training2[2,], 0.025) & 
+significance_vec_full_training2 = c(significance_vec_full_training2, unname(!(0 >= quantile(theta_sample_full_training2[2,], 0.025) & 
                                                   0 <= quantile(theta_sample_full_training2[2,], 0.975))))
-significance_vec = c(significance_vec, unname(!(0 >= quantile(theta_sample_full_training2[3,], 0.025) & 
+significance_vec_full_training2 = c(significance_vec_full_training2, unname(!(0 >= quantile(theta_sample_full_training2[3,], 0.025) & 
                                                   0 <= quantile(theta_sample_full_training2[3,], 0.975))))
-significance_vec = c(significance_vec, unname(!(0 >= quantile(theta_sample_full_training2[4,], 0.025) & 
+significance_vec_full_training2 = c(significance_vec_full_training2, unname(!(0 >= quantile(theta_sample_full_training2[4,], 0.025) & 
                                                   0 <= quantile(theta_sample_full_training2[4,], 0.975))))
-significance_vec = c(significance_vec, unname(!(0 >= quantile(theta_sample_full_training2[5,], 0.025) & 
+significance_vec_full_training2 = c(significance_vec_full_training2, unname(!(0 >= quantile(theta_sample_full_training2[5,], 0.025) & 
                                                   0 <= quantile(theta_sample_full_training2[5,], 0.975))))
 #Pred
 
 
-v_pred_test_vec = vector()
-y_pred_test_vec = vector()
+v_pred_test_vec_training2 = vector()
+y_pred_test_vec_training2 = vector()
 for (pred_i in (1:n_testing)) {
   Sigma_12_vec = vector()
   for (j in (1:n_full_training2)) {
@@ -993,24 +888,36 @@ for (pred_i in (1:n_testing)) {
   v_tmp_given_v1_covar = 1 - t(Sigma_12_vec) %*% inv_SIGMA_sp_kro_inv_SIGMA_tmp_full_training2 %*% Sigma_12_vec
   v_tmp_given_v1_mean = t(Sigma_12_vec) %*% inv_SIGMA_sp_kro_inv_SIGMA_tmp_full_training2 %*% rowMeans(v_sample_full_training2)
   v_tmp_given_v1 = v_tmp_given_v1_mean + sqrt(mean(sigma1_sq_sample_full_training2)) * t(chol(v_tmp_given_v1_covar)) * rnorm(1)
-  v_pred_test_vec = c(v_pred_test_vec, v_tmp_given_v1)
-  if(pred_i %% n_tmp_testing == 0){
-    temp_var = (n_tmp_full_training2+n_tmp_testing)/n_tmp_total
-    X_vec_tmp = c(1, log(testing$population[pred_i]), temp_var, temp_var^2, y_pred_test_vec[pred_i - 1])
-  }else if(pred_i %% n_tmp_testing == 1){
-    temp_var = (pred_i %% n_tmp_testing + n_tmp_full_training2 )/n_tmp_total
-    X_vec_tmp = c(1, log(testing$population[pred_i]), temp_var, temp_var^2, 
-                  y_full_training2[(floor(pred_i/n_tmp_testing)+1)*n_tmp_full_training2 - 1])
+  v_pred_test_vec_training2 = c(v_pred_test_vec_training2, v_tmp_given_v1)
+  if(pred_i %% n_tmp_testing == 1){
+    X_vec_tmp = c(1, log(testing$population[pred_i]), testing$time[pred_i], testing$time_sq[pred_i], 
+                  100*testing$prev_log_prevalence[pred_i])
   }else{
-    temp_var = (pred_i %% n_tmp_testing + n_tmp_training2 )/n_tmp_total
-    X_vec_tmp = c(1, log(testing$population[pred_i]), temp_var, temp_var^2, y_pred_test_vec[pred_i - 1])
+    X_vec_tmp = c(1, log(testing$population[pred_i]), testing$time[pred_i], testing$time_sq[pred_i], 
+                  y_pred_test_vec_training2[pred_i - 1])
   }
   y_pred_test = X_vec_tmp %*% rowMeans(theta_sample_full_training2) + v_tmp_given_v1 + sqrt(mean(sigma2_sq_sample_full_training2))*rnorm(1)
   v_pred_val_vec = c(v_pred_val_vec, v_tmp_given_v1)
-  y_pred_test_vec = c(y_pred_test_vec, y_pred_test)
+  y_pred_test_vec_training2 = c(y_pred_test_vec_training2, y_pred_test)
 }
 
 #prediction errors
-mape_prediction_test = (sum(abs( (y_testing - y_pred_test_vec)/y_testing )))/n_testing
+mape_prediction_test_training2 = (sum(abs( (y_testing - y_pred_test_vec_training2)/y_testing )))/n_testing
 
 
+###################################################################################################################################
+
+
+#Adding columns for fitted and predicted values
+log_prev_model_vec = vector()#c(estimated_y_full_training2, y_pred_test_vec_training2)
+is_trained_vec = c(rep(1,n_full_training2),rep(0,n_testing))
+for (loc in (1:n_sp)) {
+  log_prev_model_vec = c(log_prev_model_vec, 
+                         estimated_y_full_training2[(((loc - 1)*n_tmp_full_training2+1):(loc*n_tmp_full_training2))],
+                         y_pred_test_vec_training2[(((loc - 1)*n_tmp_testing+1):(loc*n_tmp_testing))])
+}
+log_prev_model_vec = log_prev_model_vec/100
+df$is_trained = is_trained_vec
+df$log_prev_model_values = log_prev_model_vec
+
+write.csv(df,"D:/Term5/IS&RA/US_statewise_weekly_withfitted_model.csv",row.names = FALSE)
