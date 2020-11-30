@@ -107,7 +107,8 @@ statewise_weekly = statewise %>%
     incidence = ifelse(new_cases > 0,new_cases/population,0),
     log_incidence = log(incidence + 0.1), # avoiding error for 0 cases
     prev_day_actual = dplyr::lag(new_cases,default = min(confirmed))
-  )
+  ) %>%
+  ungroup()
 
 # write the data in a csv file
 write.csv(x = statewise_weekly,file = "~/Documents/GitHub/COVID_Analysis/Code/US_statewise_weekly.csv",row.names = F)
