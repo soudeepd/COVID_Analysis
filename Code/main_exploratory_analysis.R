@@ -33,33 +33,33 @@ p1 = plot_usmap(data = data_subset1,values = "log_prevalence",color = "black",ex
   scale_fill_continuous(name = "log_prevalence",low = "white",high = "black",limits = c(LL,UL),label = scales::comma) + 
   theme(legend.position = "right") +
   ggtitle("6 Apr, 2020") +
-  theme(plot.title = element_text(hjust = 0.5,size = 15),
-        legend.text = element_text(size = 15),
-        legend.title = element_text(size = 15))
+  theme(plot.title = element_text(hjust = 0.5,size = 20),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 20))
 
 p2 = plot_usmap(data = data_subset2,values = "log_prevalence",color = "black",exclude = c("AK","HI")) + 
   scale_fill_continuous(name = "log_prevalence",low = "white",high = "black",limits = c(LL,UL),label = scales::comma) + 
   theme(legend.position = "right") +
   ggtitle("22 Jun, 2020") +
-  theme(plot.title = element_text(hjust = 0.5,size = 15),
-        legend.text = element_text(size = 15),
-        legend.title = element_text(size = 15))
+  theme(plot.title = element_text(hjust = 0.5,size = 20),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 20))
 
 p3 = plot_usmap(data = data_subset3,values = "log_prevalence",color = "black",exclude = c("AK","HI")) + 
   scale_fill_continuous(name = "log_prevalence",low = "white",high = "black",limits = c(LL,UL),label = scales::comma) + 
   theme(legend.position = "right") +
   ggtitle("7 Sep, 2020") +
-  theme(plot.title = element_text(hjust = 0.5,size = 15),
-        legend.text = element_text(size = 15),
-        legend.title = element_text(size = 15))
+  theme(plot.title = element_text(hjust = 0.5,size = 20),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 20))
 
 p4 = plot_usmap(data = data_subset4,values = "log_prevalence",color = "black",exclude = c("AK","HI")) + 
   scale_fill_continuous(name = "log_prevalence",low = "white",high = "black",limits = c(LL,UL),label = scales::comma) + 
   theme(legend.position = "right") +
   ggtitle("23 Nov, 2020") +
-  theme(plot.title = element_text(hjust = 0.5,size = 15),
-        legend.text = element_text(size = 15),
-        legend.title = element_text(size = 15))
+  theme(plot.title = element_text(hjust = 0.5,size = 20),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 20))
 
 # merge them together and save on file
 ggpubr::ggarrange(p1,p2,p3,p4) + 
