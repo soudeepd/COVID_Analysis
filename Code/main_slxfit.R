@@ -15,7 +15,7 @@ neib <- knn2nb(knearneigh(coordinates(spdf),longlat = TRUE))
 lw <- nb2listw(neib,style = "W") # here see documentation, you can use W/B/C/U/minimax/S
 
 # define the regressors and then run the model
-regset = c("time","time_sq","prev_log_new_death","prev_log_prevalence_country")
+regset = c("time","time_sq","prev_log_new_death","prev_log_prevalence","prev_log_prevalence_country")
 model_formula = paste("log_prevalence~",paste(regset,collapse = "+"))
 slxmodel <- lagsarlm(formula(model_formula),data = spdf,listw = lw)
 summary(slxmodel)
