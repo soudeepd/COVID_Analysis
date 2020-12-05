@@ -65,32 +65,32 @@ full_training2 = df %>% filter(week <= test_wk_min)
 
 
 #:::::: PREVIOUS CODES
-
-#Adding columns to Data
-n = length(df$country)
-n_sp = length(unique(df$state))
-n_tmp = n/n_sp
-
-time_vec = vector()
-time_sq_vec = vector()
-y_st_vec = vector()
-for (j in (1:n)) {
-  if(j %% n_tmp==0){
-    temp_var = 1
-    y_st = df$log_prevalence[j-1]
-  }else if(j %% n_tmp == 1){
-    temp_var = (j %% n_tmp)/n_tmp
-    y_st = 0
-  }else{
-    temp_var = (j %% n_tmp)/n_tmp
-    y_st = df$log_prevalence[j-1]
-  }
-  time_vec = c(time_vec, temp_var)
-  time_sq_vec = c(time_sq_vec, temp_var^2)
-  y_st_vec = c(y_st_vec, y_st)
-}
-
-df$time = time_vec
-df$time_sq = time_sq_vec
-df$prev_log_prevalence = y_st_vec
-
+# 
+# #Adding columns to Data
+# n = length(df$country)
+# n_sp = length(unique(df$state))
+# n_tmp = n/n_sp
+# 
+# time_vec = vector()
+# time_sq_vec = vector()
+# y_st_vec = vector()
+# for (j in (1:n)) {
+#   if(j %% n_tmp==0){
+#     temp_var = 1
+#     y_st = df$log_prevalence[j-1]
+#   }else if(j %% n_tmp == 1){
+#     temp_var = (j %% n_tmp)/n_tmp
+#     y_st = 0
+#   }else{
+#     temp_var = (j %% n_tmp)/n_tmp
+#     y_st = df$log_prevalence[j-1]
+#   }
+#   time_vec = c(time_vec, temp_var)
+#   time_sq_vec = c(time_sq_vec, temp_var^2)
+#   y_st_vec = c(y_st_vec, y_st)
+# }
+# 
+# df$time = time_vec
+# df$time_sq = time_sq_vec
+# df$prev_log_prevalence = y_st_vec
+# 
