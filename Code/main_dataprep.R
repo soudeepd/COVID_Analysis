@@ -16,7 +16,7 @@ set.seed(2020)
 
 # read the statewise weekly data
 df = read.csv(file = "~/Documents/GitHub/COVID_Analysis/Code/US_statewise_weekly.csv")
-df = read.csv(file = "D:/Term5/IS&RA/gitrepo/COVID_Analysis/Code/US_statewise_weekly.csv")
+# df = read.csv(file = "D:/Term5/IS&RA/gitrepo/COVID_Analysis/Code/US_statewise_weekly.csv")
 
 # check class of the columns in the data and change their class if needed
 sapply(df,class) 

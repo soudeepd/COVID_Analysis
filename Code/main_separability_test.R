@@ -64,10 +64,10 @@ for (j in 1:rpts){
 }
 
 # see how many times the test is not rejecting the separability assumption
-mean(pvals_sep > 0.05)
+mean(pvals_sep > 0.01)
 
 # see how many times the test is not rejecting the spatial stationarity assumption
-mean(pvals_stn > 0.05)
+mean(pvals_stn > 0.01)
 
 
 

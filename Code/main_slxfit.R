@@ -2,6 +2,8 @@
 # load relevant libraries
 library(spdep)
 library(sf)
+library(spatialreg)
+library(scoringRules)
 
 # the data needs to be prepared
 source("~/Documents/GitHub/COVID_Analysis/Code/main_dataprep.R")
@@ -27,8 +29,14 @@ coordinates(preddf) <- ~ long + lat
 predneib <- knn2nb(knearneigh(coordinates(preddf),longlat = TRUE))
 predlw <- spdep::nb2listw(predneib,style = "B")
 
-slxpredict <- predict.sarlm(slxmodel,newdata = preddf,listw = predlw)
-df$slxfit = slxpredict
+slxpredict <- predict.sarlm(object = slxmodel,
+                            newdata = data.frame(df),
+                            listw = predlw,
+                            pred.type = "TS",
+                            legacy.mixed = TRUE)
+df$slxfit = as.numeric(slxpredict)
+
+errorsd = sqrt(slxmodel$s2)
 
 # error summary for the testing part
 slxerror = df %>% 
@@ -36,10 +44,15 @@ slxerror = df %>%
   dplyr::select(week,state,log_prevalence,slxfit) %>%
   mutate(
     error = slxfit - log_prevalence,
-    mape = 100*abs(error)/abs(log_prevalence)
+    mape = 100*abs(error)/abs(log_prevalence),
+    crp_score = crps(y = log_prevalence,
+                     family = "normal",
+                     mean = slxfit,
+                     sd = errorsd)
   ) %>%
   mutate_if(is.numeric,round,digits = 3) 
 
+mean(slxerror$crp_score)
 mean(slxerror$mape)
 slxerror %>%
   group_by(state) %>%
